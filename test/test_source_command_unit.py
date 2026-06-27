@@ -24,15 +24,32 @@ class TestSourceCommand(unittest.TestCase):
         self.assertNotIn("source", conf["allowed"])
 
     @patch.dict(os.environ, {}, clear=True)
-    def test_cmd_source_loads_fixture_exports(self):
-        """Load exported values from a checked-in source fixture."""
+    def test_cmd_source_loads_fixture_assignments(self):
+        """Load exported and plain assignments from a checked-in source fixture."""
         self.assertEqual(builtincmd.cmd_source(SOURCE_FIXTURE), 0)
+        self.assertEqual(os.environ.get("IGNORED_ASSIGNMENT"), "should_not_be_imported")
         self.assertEqual(os.environ.get("SOURCE_SIMPLE"), "value")
         self.assertEqual(os.environ.get("SOURCE_SINGLE_QUOTED"), "two words")
         self.assertEqual(os.environ.get("SOURCE_DOUBLE_QUOTED"), "hello world")
         self.assertEqual(os.environ.get("SOURCE_EMPTY"), "")
         self.assertEqual(os.environ.get("SOURCE_WITH_EQUALS"), "a=b=c")
-        self.assertIsNone(os.environ.get("IGNORED_ASSIGNMENT"))
+
+    @patch.dict(os.environ, {}, clear=True)
+    def test_cmd_source_loads_plain_environment_assignments(self):
+        """Load `/etc/environment`-style KEY=value lines without `export`."""
+        with tempfile.NamedTemporaryFile("w", delete=False) as env_file:
+            env_file.write("TS_IP=10.10.10.5\n")
+            env_file.write("MNG_IPs='1.1.1.1,2.2.2.2'\n")
+            env_file.write('PUBLIC_TCP="80,443"\n')
+            file_path = env_file.name
+
+        try:
+            self.assertEqual(builtincmd.cmd_source(file_path), 0)
+            self.assertEqual(os.environ.get("TS_IP"), "10.10.10.5")
+            self.assertEqual(os.environ.get("MNG_IPs"), "1.1.1.1,2.2.2.2")
+            self.assertEqual(os.environ.get("PUBLIC_TCP"), "80,443")
+        finally:
+            os.remove(file_path)
 
     def test_cmd_source_missing_file_returns_error(self):
         """Return an error and stderr message when the source file is missing."""

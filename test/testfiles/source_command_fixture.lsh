@@ -1,5 +1,5 @@
 # Source fixture for lshell tests.
-# Only exported assignments should be loaded into the shell environment.
+# Plain KEY=value lines and exported assignments should both be loaded.
 
 IGNORED_ASSIGNMENT=should_not_be_imported
 

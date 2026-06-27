@@ -51,6 +51,31 @@ class TestEnvVarsFilesUnit(unittest.TestCase):
             else:
                 os.environ[key] = prev
 
+    def test_env_vars_files_plain_assignments_override_env_vars(self):
+        """Plain KEY=value env files should behave like `/etc/environment`."""
+        key = "LSHELL_ENV_VARS_FILES_ETC_ENV"
+        prev = os.environ.get(key)
+
+        with tempfile.NamedTemporaryFile("w", delete=False) as env_file:
+            env_file.write(f"{key}=from_plain_file\n")
+            env_path = env_file.name
+
+        try:
+            CheckConfig(
+                self.args
+                + [
+                    f"--env_vars={{'{key}':'from_conf'}}",
+                    f"--env_vars_files=['{env_path}']",
+                ]
+            ).returnconf()
+            self.assertEqual(os.environ.get(key), "from_plain_file")
+        finally:
+            os.remove(env_path)
+            if prev is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = prev
+
 
 if __name__ == "__main__":
     unittest.main()

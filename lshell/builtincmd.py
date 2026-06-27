@@ -136,6 +136,33 @@ def cmd_export(args):
     return 0, None
 
 
+def _parse_env_assignment(line):
+    """Parse `export KEY=value` or `KEY=value` without executing shell code."""
+    try:
+        tokens = shlex.split(line, posix=True)
+    except ValueError:
+        return None, None
+
+    if not tokens:
+        return None, None
+
+    assignment = None
+    if tokens[0] == "export":
+        if len(tokens) == 2 and "=" in tokens[1]:
+            assignment = tokens[1]
+    elif len(tokens) == 1 and "=" in tokens[0]:
+        assignment = tokens[0]
+
+    if not assignment:
+        return None, None
+
+    var, value = assignment.split("=", 1)
+    if not var:
+        return None, None
+
+    return var, value
+
+
 def cmd_source(envfile):
     """Source a file in the current shell context"""
     envfile = envfile.strip().strip("'").strip('"')
@@ -147,13 +174,16 @@ def cmd_source(envfile):
                 line = env_var.strip()
                 if not line or line.startswith("#"):
                     continue
-                if line.startswith("export "):
-                    export_ret, var = cmd_export(line)
-                    if export_ret == 1 and var:
-                        sys.stderr.write(
-                            f"lshell: forbidden environment variable: {var}\n"
-                        )
-                        retcode = 1
+                var, value = _parse_env_assignment(line)
+                if var is None:
+                    continue
+                if variables.is_forbidden_environment_key(var):
+                    sys.stderr.write(
+                        f"lshell: forbidden environment variable: {var}\n"
+                    )
+                    retcode = 1
+                    continue
+                os.environ.update({var: value})
     except (OSError, IOError):
         sys.stderr.write(f"lshell: unable to read environment file: {envfile}\n")
         return 1

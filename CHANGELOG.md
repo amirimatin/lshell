@@ -3,6 +3,10 @@
 Contact: [ghantoos@ghantoos.org](mailto:ghantoos@ghantoos.org)  
 [https://github.com/ghantoos/lshell](https://github.com/ghantoos/lshell)
 
+### v0.12.1 27/06/2026
+- Compatibility: `source` and `env_vars_files` now accept plain `KEY=value` lines in addition to `export KEY=value`, so `/etc/environment`-style files load correctly without executing shell code.
+- Security: Kept forbidden environment-variable filtering in place for plain assignments too, so dangerous variables such as `PATH`, `SHELLOPTS`, and `BASH_FUNC_*` remain blocked.
+
 ### v0.12.0 17/06/2026
 - Packaging/CI: Raised minimum supported Python version to 3.10 (`requires-python >=3.10`), removed EOL Python versions from CI, and aligned docs/package metadata with the new baseline; CI/classifiers now track active CPython release branches 3.10-3.14 (Python 3.6 reached EOL on 23/12/2021).
 - Security: Removed regex-driven shell parsing from the authorization flow.
