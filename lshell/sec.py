@@ -146,6 +146,90 @@ def _split_command_for_auth(command_line):
     return command, args, full_command
 
 
+def resolve_sudo_policy_command(command_args_list):
+    """Return the sudo policy token represented by a sudo argv tail.
+
+    The returned value is the subcommand name that should be matched against
+    ``sudo_commands``. ``sudo -e`` and ``sudo --edit`` are normalized to the
+    built-in ``sudoedit`` token so deployments can allow secure editing without
+    exposing general-purpose ``sudo`` execution.
+    """
+    if not command_args_list:
+        return "", True
+
+    index = 0
+    option_with_value = {
+        "-C",
+        "--close-from",
+        "-g",
+        "--group",
+        "-h",
+        "--host",
+        "-R",
+        "--chroot",
+        "-r",
+        "--role",
+        "-T",
+        "--command-timeout",
+        "-t",
+        "--type",
+        "-u",
+        "--user",
+    }
+
+    while index < len(command_args_list):
+        token = command_args_list[index]
+
+        if token == "--":
+            index += 1
+            break
+
+        if token in ("-e", "--edit") or token.startswith("--edit="):
+            return "sudoedit", False
+
+        if token in option_with_value:
+            if index + 1 >= len(command_args_list):
+                return "", True
+            index += 2
+            continue
+
+        if token.startswith("--"):
+            index += 1
+            continue
+
+        if token.startswith("-") and token not in ("-",):
+            if token.startswith("-u") and token != "-u":
+                index += 1
+                continue
+            if token.startswith("-g") and token != "-g":
+                index += 1
+                continue
+            if token.startswith("-h") and token != "-h":
+                index += 1
+                continue
+            if token.startswith("-r") and token != "-r":
+                index += 1
+                continue
+            if token.startswith("-t") and token != "-t":
+                index += 1
+                continue
+            if token.startswith("-C") and token != "-C":
+                index += 1
+                continue
+            if token.startswith("-T") and token != "-T":
+                index += 1
+                continue
+            if token.startswith("-R") and token != "-R":
+                index += 1
+                continue
+            index += 1
+            continue
+
+        return token, False
+
+    return "", True
+
+
 def warn_count(messagetype, command, conf, strict=None, ssh=None):
     """Update the warning_counter, log and display a warning to the user"""
 
@@ -944,17 +1028,8 @@ def check_secure(line, conf, strict=None, ssh=None, _depth=0):
 
         # in case of a sudo command, check in sudo_commands list if allowed
         if command == "sudo" and command_args_list:
-            # allow the -u (user) flag
-            if command_args_list[0] == "-u" and command_args_list:
-                if len(command_args_list) < 3:
-                    ret, conf = warn_count(
-                        "sudo command", oline, conf, strict=strict, ssh=ssh
-                    )
-                    return ret, conf
-                sudocmd = command_args_list[2]
-            else:
-                sudocmd = command_args_list[0]
-            if sudocmd not in conf["sudo_commands"] and command_args_list:
+            sudocmd, missing_target = resolve_sudo_policy_command(command_args_list)
+            if missing_target or sudocmd not in conf["sudo_commands"]:
                 ret, conf = warn_count(
                     "sudo command", oline, conf, strict=strict, ssh=ssh
                 )

@@ -278,6 +278,34 @@ class TestHistorySizeUnit(unittest.TestCase):
         self.assertEqual(shell.history_search_state["matches"], [])
         self.assertIsNone(shell.history_search_state["index"])
 
+    def test_history_search_on_empty_prompt_starts_from_latest_match(self):
+        """Initial Up Arrow on an empty prompt should start history navigation safely."""
+        conf = CheckConfig(self.args + ["--strict=0"]).returnconf()
+        shell = ShellCmd(
+            conf,
+            args=[],
+            stdin=io.StringIO(),
+            stdout=io.StringIO(),
+            stderr=io.StringIO(),
+        )
+
+        history_items = {
+            1: "help",
+            2: "echo alpha",
+            3: "exit",
+        }
+        replaced = []
+        with patch("lshell.shellcmd.readline.get_current_history_length", return_value=3):
+            with patch("lshell.shellcmd.readline.get_history_item", side_effect=history_items.get):
+                with patch("lshell.shellcmd._replace_readline_buffer", side_effect=replaced.append):
+                    with patch("lshell.shellcmd.readline.get_line_buffer", return_value=""):
+                        shell.history_search(True)
+
+        self.assertEqual(replaced, ["exit"])
+        self.assertEqual(shell.history_search_state["matches"], ["exit", "echo alpha", "help"])
+        self.assertEqual(shell.history_search_state["index"], 0)
+        self.assertEqual(shell.history_search_state["original_line"], "")
+
     def test_readline_char_point_converts_utf8_byte_offset_to_character_index(self):
         """Byte-based readline cursor offsets should map safely back to string indices."""
         with patch("lshell.shellcmd._readline_point", return_value=2):

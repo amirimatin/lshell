@@ -1,6 +1,7 @@
-lshell (0.12.1-1) UNRELEASED; urgency=medium
+lshell (0.12.3-1) UNRELEASED; urgency=medium
 
   * New upstream release.
+  * Fix initial Up Arrow history navigation on an empty prompt.
 
   * debian/watch:
     - Corrected to work with lshell versioning on github.

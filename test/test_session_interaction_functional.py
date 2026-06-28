@@ -562,6 +562,27 @@ class TestSessionInteractionFunctional(unittest.TestCase):
             self._safe_exit(child)
             child.close(force=True)
 
+    def test_sudo_edit_alias_form_invokes_direct_sudo_path(self):
+        """`sudo -e` should be accepted when sudoedit is allow-listed."""
+        with tempfile.TemporaryDirectory(prefix="lshell-sudoedit-bindir-") as bindir:
+            sudo_path = os.path.join(bindir, "sudo")
+            with open(sudo_path, "w", encoding="utf-8") as handle:
+                handle.write("#!/bin/sh\necho SUDO_ARGS:$@\n")
+            os.chmod(sudo_path, 0o700)
+
+            child = self._spawn_shell(
+                "--allowed \"['sudo']\" "
+                "--sudo_commands \"['sudoedit']\" "
+                "--forbidden \"[]\" "
+                f"--env_path {bindir}"
+            )
+            try:
+                output = self._run_command(child, "sudo -e notes.txt")
+                self.assertIn("SUDO_ARGS:-e notes.txt", output)
+            finally:
+                self._safe_exit(child)
+                child.close(force=True)
+
     def test_lps1_prompt_override_persists_across_prompt_refresh(self):
         """LPS1 environment prompt override should remain stable after commands."""
         custom_prompt = "LSHELL_PROMPT> "

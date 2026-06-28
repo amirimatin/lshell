@@ -61,6 +61,26 @@ class TestEngineSecurityRegressions(unittest.TestCase):
         self.assertFalse(decision.allowed)
         self.assertEqual(decision.reason.code, reasons.UNKNOWN_SYNTAX)
 
+    def test_authorizer_allows_sudo_edit_when_sudoedit_is_allowlisted(self):
+        """`sudo -e` should be treated as the sudoedit built-in."""
+        decision = authorizer.authorize_line(
+            "sudo -e /core/test.txt",
+            self._policy(sudo_commands=["sudoedit"]),
+            mode="policy",
+            check_current_dir=False,
+        )
+        self.assertTrue(decision.allowed)
+
+    def test_authorizer_allows_sudo_edit_long_option_assignment(self):
+        """`sudo --edit=file` should also map to sudoedit."""
+        decision = authorizer.authorize_line(
+            "sudo --edit=/core/test.txt",
+            self._policy(sudo_commands=["sudoedit"]),
+            mode="policy",
+            check_current_dir=False,
+        )
+        self.assertTrue(decision.allowed)
+
     def test_substitution_denied_when_inner_command_not_allowlisted(self):
         """Nested substitution should enforce inner command allow-list."""
         decision = authorizer.authorize_line(

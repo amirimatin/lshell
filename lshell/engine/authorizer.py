@@ -203,26 +203,14 @@ def authorize(
         full_command = command_node.full_command
 
         if command == "sudo" and command_args_list:
-            if command_args_list[0] == "-u":
-                if len(command_args_list) < 3:
-                    return _deny(
-                        reasons.FORBIDDEN_SUDO_COMMAND,
-                        canonical_ast,
-                        command="",
-                        line=oline,
-                        missing_target=True,
-                    )
-                sudocmd = command_args_list[2]
-            else:
-                sudocmd = command_args_list[0]
-
-            if sudocmd not in policy.get("sudo_commands", []):
+            sudocmd, missing_target = sec.resolve_sudo_policy_command(command_args_list)
+            if missing_target or sudocmd not in policy.get("sudo_commands", []):
                 return _deny(
                     reasons.FORBIDDEN_SUDO_COMMAND,
                     canonical_ast,
                     command=sudocmd,
                     line=oline,
-                    missing_target=False,
+                    missing_target=missing_target,
                 )
 
         if (

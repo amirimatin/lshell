@@ -613,7 +613,10 @@ class ShellCmd(cmd.Cmd, object):
         if state["matches"] and state["index"] is not None:
             active_match = state["matches"][state["index"]]
 
-        continuing = current_line in (state["original_line"], active_match)
+        continuing = (
+            state["index"] is not None
+            and current_line in (state["original_line"], active_match)
+        )
         if not continuing:
             if not backward:
                 self.reset_history_search_state()
