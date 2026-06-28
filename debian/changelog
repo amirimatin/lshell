@@ -1,12 +1,14 @@
-lshell (0.12.3-1) UNRELEASED; urgency=medium
+lshell (0.12.5-1) UNRELEASED; urgency=medium
 
   * New upstream release.
   * Fix initial Up Arrow history navigation on an empty prompt.
+  * Add menu-style completion cycling on Left/Right arrows while preserving
+    normal cursor movement outside active completion menus.
 
   * debian/watch:
     - Corrected to work with lshell versioning on github.
 
- -- Ignace Mouzannar <mouzannar@gmail.com>  Sat, 27 Jun 2026 16:47:49 +0330
+ -- Ignace Mouzannar <mouzannar@gmail.com>  Sun, 28 Jun 2026 17:25:10 +0330
 
 lshell (0.9.18-2) unstable; urgency=medium
 

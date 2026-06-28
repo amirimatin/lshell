@@ -42,6 +42,7 @@ READLINE_INCREMENTAL_SEARCH_BINDINGS = (
 _READLINE_LIB = None
 _READLINE_COMMAND_FUNC = None
 _READLINE_HISTORY_SEARCH_CALLBACKS = []
+_READLINE_COMPLETION_NAV_CALLBACKS = []
 _ACTIVE_HISTORY_SEARCH_SHELL = None
 _ACTIVE_COMPLETION_SHELL = None
 
@@ -122,17 +123,21 @@ def _get_readline_library():
     return _READLINE_LIB
 
 
-def _replace_readline_buffer(text):
-    """Replace the active readline buffer with text and move cursor to the end."""
+def _replace_readline_buffer(text, cursor_index=None):
+    """Replace the active readline buffer and place the cursor safely."""
     readline_lib = _get_readline_library()
     if readline_lib is None:
         return
 
+    if cursor_index is None:
+        cursor_index = len(text)
+    cursor_index = max(0, min(len(text), cursor_index))
+
     encoded = text.encode("utf-8")
+    encoded_point = len(text[:cursor_index].encode("utf-8"))
     readline_lib.rl_replace_line(encoded, 0)
-    encoded_length = len(encoded)
-    ctypes.c_int.in_dll(readline_lib, "rl_point").value = encoded_length
-    ctypes.c_int.in_dll(readline_lib, "rl_end").value = encoded_length
+    ctypes.c_int.in_dll(readline_lib, "rl_point").value = encoded_point
+    ctypes.c_int.in_dll(readline_lib, "rl_end").value = len(encoded)
     readline_lib.rl_redisplay()
 
 
@@ -151,6 +156,15 @@ def _readline_char_point(text):
     if point >= len(encoded):
         return len(text)
     return len(encoded[:point].decode("utf-8", "ignore"))
+
+
+def _move_readline_cursor(step):
+    """Move the cursor left/right without changing the active line content."""
+    current_line = readline.get_line_buffer()
+    current_index = _readline_char_point(current_line)
+    next_index = max(0, min(len(current_line), current_index + step))
+    _replace_readline_buffer(current_line, cursor_index=next_index)
+    return 0
 
 
 def _dispatch_history_search(backward):
@@ -176,6 +190,29 @@ def _history_search_forward(unused_count, unused_key):
     return _dispatch_history_search(backward=False)
 
 
+def _dispatch_completion_navigation(forward):
+    """Route left/right callbacks to menu-style completion navigation."""
+    shell = _ACTIVE_COMPLETION_SHELL
+    if shell is None:
+        return _move_readline_cursor(1 if forward else -1)
+
+    try:
+        return shell.navigate_completion(forward)
+    except Exception:
+        shell.reset_completion_navigation_state()
+        return _move_readline_cursor(1 if forward else -1)
+
+
+def _completion_forward(unused_count, unused_key):
+    """Readline callback for cycling to the next completion candidate."""
+    return _dispatch_completion_navigation(forward=True)
+
+
+def _completion_backward(unused_count, unused_key):
+    """Readline callback for cycling to the previous completion candidate."""
+    return _dispatch_completion_navigation(forward=False)
+
+
 def _bind_custom_history_search(shell):
     """Bind arrow keys to lshell-managed prefix history search callbacks."""
     global _ACTIVE_HISTORY_SEARCH_SHELL
@@ -194,6 +231,28 @@ def _bind_custom_history_search(shell):
         (b"\\eOA", backward),
         (b"\\e[B", forward),
         (b"\\eOB", forward),
+    )
+    return all(readline_lib.rl_bind_keyseq(keyseq, callback) == 0 for keyseq, callback in bindings)
+
+
+def _bind_custom_completion_navigation(shell):
+    """Bind left/right arrows to lshell completion cycling with safe fallback."""
+    global _ACTIVE_COMPLETION_SHELL
+
+    readline_lib = _get_readline_library()
+    if readline_lib is None or _READLINE_COMMAND_FUNC is None:
+        return False
+
+    forward = _READLINE_COMMAND_FUNC(_completion_forward)
+    backward = _READLINE_COMMAND_FUNC(_completion_backward)
+    _READLINE_COMPLETION_NAV_CALLBACKS[:] = [forward, backward]
+    _ACTIVE_COMPLETION_SHELL = shell
+
+    bindings = (
+        (b"\\e[C", forward),
+        (b"\\eOC", forward),
+        (b"\\e[D", backward),
+        (b"\\eOD", backward),
     )
     return all(readline_lib.rl_bind_keyseq(keyseq, callback) == 0 for keyseq, callback in bindings)
 
@@ -259,6 +318,7 @@ class ShellCmd(cmd.Cmd, object):
         # initialize return code
         self.retcode = 0
         self.reset_history_search_state()
+        self.reset_completion_navigation_state()
         self.completion_display_context = "Allowed completions"
         self.old_display_matches_hook = None
 
@@ -577,6 +637,7 @@ class ShellCmd(cmd.Cmd, object):
             global _ACTIVE_COMPLETION_SHELL
             _ACTIVE_COMPLETION_SHELL = self
             readline.set_completion_display_matches_hook(_display_completion_matches)
+        _bind_custom_completion_navigation(self)
         for binding in READLINE_INCREMENTAL_SEARCH_BINDINGS:
             readline.parse_and_bind(binding)
         if not _bind_custom_history_search(self):
@@ -590,6 +651,16 @@ class ShellCmd(cmd.Cmd, object):
             "matches": [],
             "index": None,
             "original_line": "",
+        }
+
+    def reset_completion_navigation_state(self):
+        """Clear state used for menu-style completion cycling on left/right."""
+        self.completion_navigation_state = {
+            "original_line": "",
+            "begidx": 0,
+            "endidx": 0,
+            "matches": [],
+            "index": None,
         }
 
     def _collect_history_prefix_matches(self, prefix):
@@ -650,6 +721,64 @@ class ShellCmd(cmd.Cmd, object):
 
         _replace_readline_buffer(state["original_line"])
         self.reset_history_search_state()
+        return 0
+
+    def _store_completion_navigation(self, original_line, begidx, endidx, matches):
+        """Remember the active completion token so arrows can cycle candidates."""
+        if len(matches) <= 1:
+            self.reset_completion_navigation_state()
+            return
+
+        self.completion_navigation_state = {
+            "original_line": original_line,
+            "begidx": begidx,
+            "endidx": endidx,
+            "matches": list(matches),
+            "index": None,
+        }
+
+    def _completion_candidate_line(self, index):
+        """Render a full command line for one completion candidate."""
+        state = self.completion_navigation_state
+        match = state["matches"][index]
+        line = (
+            f"{state['original_line'][:state['begidx']]}"
+            f"{match}"
+            f"{state['original_line'][state['endidx']:]}"
+        )
+        cursor_index = state["begidx"] + len(match)
+        return line, cursor_index
+
+    def navigate_completion(self, forward):
+        """Cycle active completion candidates or fall back to cursor movement."""
+        state = self.completion_navigation_state
+        if not state["matches"]:
+            return _move_readline_cursor(1 if forward else -1)
+
+        current_line = readline.get_line_buffer()
+        if _readline_char_point(current_line) != len(current_line):
+            return _move_readline_cursor(1 if forward else -1)
+
+        current_index = None
+        if current_line != state["original_line"]:
+            for index in range(len(state["matches"])):
+                candidate_line, _cursor_index = self._completion_candidate_line(index)
+                if current_line == candidate_line:
+                    current_index = index
+                    break
+            if current_index is None:
+                self.reset_completion_navigation_state()
+                return _move_readline_cursor(1 if forward else -1)
+
+        if current_index is None:
+            next_index = 0 if forward else len(state["matches"]) - 1
+        else:
+            step = 1 if forward else -1
+            next_index = (current_index + step) % len(state["matches"])
+
+        state["index"] = next_index
+        candidate_line, cursor_index = self._completion_candidate_line(next_index)
+        _replace_readline_buffer(candidate_line, cursor_index=cursor_index)
         return 0
 
     def _completion_context_label(self, compfunc):
@@ -739,6 +868,7 @@ class ShellCmd(cmd.Cmd, object):
                             global _ACTIVE_HISTORY_SEARCH_SHELL
                             _ACTIVE_HISTORY_SEARCH_SHELL = self
                             self.reset_history_search_state()
+                            self.reset_completion_navigation_state()
                             line_from_readline = True
                             try:
                                 line = input(self.conf["promptprint"])
@@ -826,15 +956,17 @@ class ShellCmd(cmd.Cmd, object):
         """
         if state == 0:
             origline = readline.get_line_buffer()
+            orig_begidx = readline.get_begidx()
+            orig_endidx = readline.get_endidx()
             line = origline.lstrip()
             # in case '|', ';', '&' used, take last part of line to complete
             line = re.split(r"&|\||;", line)[-1].lstrip()
             stripped = len(origline) - len(line)
-            begidx = readline.get_begidx() - stripped
-            endidx = readline.get_endidx() - stripped
+            begidx = orig_begidx - stripped
+            endidx = orig_endidx - stripped
             # complete with sudo allowed commands
             command = line.split(" ")[0]
-            if command == "sudo" and len(line.split(" ")) <= 2:
+            if command == "sudo":
                 compfunc = completion.complete_sudo
             # complete with directories
             elif command == "cd":
@@ -874,6 +1006,9 @@ class ShellCmd(cmd.Cmd, object):
             matches = compfunc(self.conf, text, line, begidx, endidx)
             self.completion_matches = sorted(
                 dict.fromkeys(matches), key=lambda item: item.lower()
+            )
+            self._store_completion_navigation(
+                origline, orig_begidx, orig_endidx, self.completion_matches
             )
         try:
             return self.completion_matches[state]

@@ -183,6 +183,44 @@ class TestParserUtilities(unittest.TestCase):
         self.assertIn("blabla ", result)
         self.assertNotIn("alpha ", result)
 
+    def test_complete_sudo_completes_allowed_sudo_command_names(self):
+        """Sudo completion should list configured sudo command names."""
+        conf = {"sudo_commands": ["apt", "sudoedit", "systemctl"]}
+
+        result = completion.complete_sudo(conf, "s", "sudo s", 5, 6)
+
+        self.assertEqual(result, ["sudoedit", "systemctl"])
+
+    def test_complete_sudo_completes_apt_subcommand(self):
+        """Sudo completion should complete known apt subcommands."""
+        conf = {"sudo_commands": ["apt"]}
+
+        result = completion.complete_sudo(conf, "ins", "sudo apt ins", 9, 12)
+
+        self.assertEqual(result, ["install"])
+
+    def test_complete_sudo_completes_systemctl_subcommands(self):
+        """Sudo completion should complete known systemctl subcommands."""
+        conf = {"sudo_commands": ["systemctl"]}
+
+        result = completion.complete_sudo(
+            conf, "sta", "sudo systemctl sta", 15, 18
+        )
+
+        self.assertEqual(result, ["start", "status"])
+
+    def test_complete_sudo_keeps_path_completion_for_file_commands(self):
+        """Sudo file operations should still complete allowed path operands."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            open(os.path.join(tmpdir, "sample.txt"), "w", encoding="utf-8").close()
+            conf = {"home_path": tmpdir, "path": [tmpdir, ""], "sudo_commands": ["rm"]}
+            with patch("lshell.completion.os.getcwd", return_value=tmpdir):
+                result = completion.complete_sudo(
+                    conf, "sam", "sudo rm sam", 8, 11
+                )
+
+        self.assertEqual(result, ["sample.txt "])
+
     def test_complete_list_dir_filters_for_prefixed_path(self):
         """Completion should filter basenames when the token includes a directory path."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -273,6 +311,22 @@ class TestParserUtilities(unittest.TestCase):
 
         self.assertEqual(result, [])
 
+    def test_complete_list_dir_filters_denied_children(self):
+        """Path completion should not expose children denied by path ACLs."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            os.mkdir(os.path.join(tmpdir, "safe"))
+            os.mkdir(os.path.join(tmpdir, "secret"))
+            conf = {
+                "home_path": tmpdir,
+                "path": [tmpdir, os.path.join(tmpdir, "secret")],
+            }
+
+            with patch("lshell.completion.os.getcwd", return_value=tmpdir):
+                result = completion.complete_list_dir(conf, "s", "ls s", 3, 4)
+
+        self.assertIn("safe/", result)
+        self.assertNotIn("secret/", result)
+
     def test_complete_change_dir_denied_path_does_not_suggest_root_slash(self):
         """Denied cd completion should not suggest a standalone '/' segment."""
         conf = {
@@ -287,6 +341,23 @@ class TestParserUtilities(unittest.TestCase):
             )
 
         self.assertNotIn("/", result)
+
+    def test_complete_change_dir_filters_denied_children(self):
+        """Directory completion should not expose child directories denied by ACLs."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            os.mkdir(os.path.join(tmpdir, "safe"))
+            os.mkdir(os.path.join(tmpdir, "secret"))
+            conf = {
+                "home_path": tmpdir,
+                "path": [tmpdir, os.path.join(tmpdir, "secret")],
+            }
+            with patch("lshell.completion.os.getcwd", return_value=tmpdir):
+                result = completion.complete_change_dir(
+                    conf, "s", "cd s", len("cd "), len("cd s")
+                )
+
+        self.assertIn("safe/", result)
+        self.assertNotIn("secret/", result)
 
     def test_completenames_dot_slash_with_basename_text(self):
         """Complete ./ commands when readline provides text without ./ prefix."""

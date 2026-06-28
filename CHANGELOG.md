@@ -3,6 +3,10 @@
 Contact: [ghantoos@ghantoos.org](mailto:ghantoos@ghantoos.org)  
 [https://github.com/ghantoos/lshell](https://github.com/ghantoos/lshell)
 
+### v0.12.5 28/06/2026
+- UX: Added menu-style completion cycling on `Left`/`Right` arrows so users can move across current completion candidates with `zsh`-like ergonomics while keeping `lshell` as the completion authority.
+- UX: Preserved normal cursor movement on `Left`/`Right` when no completion menu is active, so standard line editing behavior remains intact.
+
 ### v0.12.1 27/06/2026
 - Compatibility: `source` and `env_vars_files` now accept plain `KEY=value` lines in addition to `export KEY=value`, so `/etc/environment`-style files load correctly without executing shell code.
 - Security: Kept forbidden environment-variable filtering in place for plain assignments too, so dangerous variables such as `PATH`, `SHELLOPTS`, and `BASH_FUNC_*` remain blocked.

@@ -306,6 +306,49 @@ class TestHistorySizeUnit(unittest.TestCase):
         self.assertEqual(shell.history_search_state["index"], 0)
         self.assertEqual(shell.history_search_state["original_line"], "")
 
+    def test_completion_navigation_cycles_matches_with_right_and_left_arrows(self):
+        """Left/right arrows should cycle the current completion list like a menu."""
+        conf = CheckConfig(self.args + ["--strict=0"]).returnconf()
+        shell = ShellCmd(
+            conf,
+            args=[],
+            stdin=io.StringIO(),
+            stdout=io.StringIO(),
+            stderr=io.StringIO(),
+        )
+        shell._store_completion_navigation("e", 0, 1, ["echo", "exit"])
+
+        replaced = []
+        with patch("lshell.shellcmd._replace_readline_buffer", side_effect=lambda text, cursor_index=None: replaced.append((text, cursor_index))):
+            with patch("lshell.shellcmd._readline_char_point", return_value=1):
+                with patch("lshell.shellcmd.readline.get_line_buffer", return_value="e"):
+                    shell.navigate_completion(True)
+            with patch("lshell.shellcmd._readline_char_point", return_value=4):
+                with patch("lshell.shellcmd.readline.get_line_buffer", return_value="echo"):
+                    shell.navigate_completion(True)
+            with patch("lshell.shellcmd._readline_char_point", return_value=4):
+                with patch("lshell.shellcmd.readline.get_line_buffer", return_value="exit"):
+                    shell.navigate_completion(False)
+
+        self.assertEqual(replaced, [("echo", 4), ("exit", 4), ("echo", 4)])
+        self.assertEqual(shell.completion_navigation_state["index"], 0)
+
+    def test_completion_navigation_falls_back_to_cursor_motion_when_state_is_inactive(self):
+        """Left/right arrows should keep normal cursor movement when no menu is active."""
+        conf = CheckConfig(self.args + ["--strict=0"]).returnconf()
+        shell = ShellCmd(
+            conf,
+            args=[],
+            stdin=io.StringIO(),
+            stdout=io.StringIO(),
+            stderr=io.StringIO(),
+        )
+
+        with patch("lshell.shellcmd._move_readline_cursor", return_value=0) as mock_move:
+            shell.navigate_completion(True)
+
+        mock_move.assert_called_once_with(1)
+
     def test_readline_char_point_converts_utf8_byte_offset_to_character_index(self):
         """Byte-based readline cursor offsets should map safely back to string indices."""
         with patch("lshell.shellcmd._readline_point", return_value=2):

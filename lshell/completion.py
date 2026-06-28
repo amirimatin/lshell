@@ -48,9 +48,144 @@ def completenames(conf, text, line, *ignored):
     return _prefix_matches(commands, text)
 
 
+SUDO_ARGUMENT_COMPLETIONS = {
+    "apt": [
+        "autoclean",
+        "autoremove",
+        "clean",
+        "dist-upgrade",
+        "edit-sources",
+        "full-upgrade",
+        "install",
+        "list",
+        "policy",
+        "purge",
+        "reinstall",
+        "remove",
+        "satisfy",
+        "search",
+        "show",
+        "update",
+        "upgrade",
+    ],
+    "apt-cache": [
+        "depends",
+        "dump",
+        "dumpavail",
+        "madison",
+        "pkgnames",
+        "policy",
+        "rdepends",
+        "search",
+        "show",
+        "showpkg",
+        "stats",
+        "unmet",
+    ],
+    "apt-get": [
+        "autoclean",
+        "autoremove",
+        "build-dep",
+        "check",
+        "changelog",
+        "clean",
+        "dist-upgrade",
+        "download",
+        "install",
+        "purge",
+        "reinstall",
+        "remove",
+        "source",
+        "update",
+        "upgrade",
+    ],
+    "dpkg": [
+        "--audit",
+        "--configure",
+        "--contents",
+        "--get-selections",
+        "--info",
+        "--install",
+        "--list",
+        "--purge",
+        "--remove",
+        "--search",
+        "--status",
+        "--verify",
+    ],
+    "journalctl": [
+        "--boot",
+        "--catalog",
+        "--disk-usage",
+        "--follow",
+        "--kernel",
+        "--lines",
+        "--no-pager",
+        "--reverse",
+        "--since",
+        "--unit",
+        "--until",
+        "-b",
+        "-e",
+        "-f",
+        "-k",
+        "-n",
+        "-r",
+        "-u",
+    ],
+    "systemctl": [
+        "cat",
+        "daemon-reload",
+        "disable",
+        "edit",
+        "enable",
+        "is-active",
+        "is-enabled",
+        "list-unit-files",
+        "list-units",
+        "mask",
+        "reload",
+        "reload-or-restart",
+        "reset-failed",
+        "restart",
+        "show",
+        "start",
+        "status",
+        "stop",
+        "try-restart",
+        "unmask",
+    ],
+}
+
+
 def complete_sudo(conf, text, line, begidx, endidx):
-    """complete sudo command"""
-    return [a for a in conf["sudo_commands"] if a.startswith(text)]
+    """Complete sudo command names, known subcommands, and path arguments."""
+    line_before_cursor = line[:endidx] if 0 <= endidx <= len(line) else line
+    parts = line_before_cursor.split()
+    if line_before_cursor and line_before_cursor[-1].isspace():
+        parts.append("")
+
+    sudo_commands = conf["sudo_commands"]
+    if len(parts) <= 2:
+        return _prefix_matches(sudo_commands, text)
+
+    sudo_command = parts[1]
+    if sudo_command not in sudo_commands:
+        return []
+
+    argument_position = len(parts) - 3
+    if argument_position == 0:
+        subcommands = SUDO_ARGUMENT_COMPLETIONS.get(sudo_command, [])
+        if subcommands:
+            return _prefix_matches(subcommands, text)
+
+    return complete_list_dir(conf, text, line, begidx, endidx)
+
+
+def _completion_path_allowed(candidate_path, conf):
+    """Return whether a completion candidate is visible under path ACLs."""
+    ret_check_path, _conf = sec.check_path(candidate_path, conf, completion=1)
+    return ret_check_path == 0
 
 
 def complete_change_dir(conf, text, line, begidx, endidx):
@@ -84,9 +219,13 @@ def complete_change_dir(conf, text, line, begidx, endidx):
     # if path is secure, list subdirectories and files
     if ret_check_path == 0:
         for instance in os.listdir(directory):
-            if os.path.isdir(os.path.join(directory, instance)):
-                if instance.startswith(text):
-                    dirs_to_return.append(f"{instance}/")
+            candidate_path = os.path.join(directory, instance)
+            if (
+                os.path.isdir(candidate_path)
+                and instance.startswith(text)
+                and _completion_path_allowed(candidate_path, conf)
+            ):
+                dirs_to_return.append(f"{instance}/")
 
     # if path is not secure, add completion based on allowed path
     else:
@@ -150,7 +289,10 @@ def complete_list_dir(conf, text, line, begidx, endidx):
         for instance in list_dir:
             if not instance.startswith(prefix):
                 continue
-            if os.path.isdir(os.path.join(directory, instance)):
+            candidate_path = os.path.join(directory, instance)
+            if not _completion_path_allowed(candidate_path, conf):
+                continue
+            if os.path.isdir(candidate_path):
                 instance = instance + "/"
             else:
                 instance = instance + " "

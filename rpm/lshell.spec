@@ -1,5 +1,5 @@
 Name:           lshell
-Version:        0.12.1
+Version:        0.12.5
 Release:        1%{?dist}
 Summary:        Limited shell implementation in Python
 

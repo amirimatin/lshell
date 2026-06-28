@@ -204,6 +204,48 @@ class TestSessionInteractionFunctional(unittest.TestCase):
         forward_match = run_sequence("\x1b[A", "\x1b[A", "\x1b[B")
         self.assertRegex(forward_match, r"(?m)^alpha beta$")
 
+    def test_left_right_arrows_cycle_active_completion_candidates(self):
+        """Left/right arrows should rotate the visible completion candidates."""
+        with tempfile.TemporaryDirectory(prefix="lshell-menu-completion-") as tempdir:
+            first_script = os.path.join(tempdir, "pickone")
+            second_script = os.path.join(tempdir, "picktwo")
+            for script_path, marker in (
+                (first_script, "CHOSE_ONE"),
+                (second_script, "CHOSE_TWO"),
+            ):
+                with open(script_path, "w", encoding="utf-8") as handle:
+                    handle.write(f"#!/bin/sh\necho {marker}\n")
+                os.chmod(script_path, 0o755)
+
+            command = (
+                f"{LSHELL} --config {CONFIG} "
+                "--allowed \"+ ['pickone', 'picktwo']\" "
+                f"--env_path {tempdir} "
+                '--forbidden "[]" '
+                "--strict 0"
+            )
+            child = pexpect.spawn(
+                command,
+                encoding="utf-8",
+                timeout=10,
+                env=self._clean_env(),
+            )
+            child.expect(PROMPT)
+            try:
+                child.send("p")
+                child.send("\t\t")
+                child.send("\x1b[C")
+                child.send("\x1b[C")
+                child.send("\x1b[D")
+                child.sendline("")
+                child.expect(PROMPT)
+                output = child.before.replace("\r", "").replace("\x08", "")
+                self.assertIn("CHOSE_ONE", output)
+                self.assertNotIn("CHOSE_TWO", output)
+            finally:
+                self._safe_exit(child)
+                child.close(force=True)
+
     def test_history_command_persists_deduplicated_normalized_entries(self):
         """History output should apply duplicate removal and blank reduction policies."""
         with tempfile.NamedTemporaryFile(
